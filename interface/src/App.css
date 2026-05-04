@@ -1,0 +1,104 @@
+.sentinel-app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* ---- Main grid layout ---- */
+.sentinel-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr 0.8fr;
+  gap: 4px;
+  padding: 4px;
+  min-height: 0;
+}
+
+.grid-left     { min-height: 0; overflow: hidden; }
+.grid-right    { min-height: 0; overflow: hidden; }
+
+.grid-center {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.grid-center-top {
+  flex: 1.1;
+  min-height: 0;
+}
+
+.grid-center-bottom {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- Active Defense Styling ---- */
+.mode--defense {
+  box-shadow: inset 0 0 100px rgba(255, 23, 68, 0.15);
+  border: 2px solid var(--red);
+  animation: alarm-border 2s infinite;
+}
+
+@keyframes alarm-border {
+  0%, 100% { border-color: var(--red); }
+  50% { border-color: rgba(255, 23, 68, 0.3); }
+}
+
+.scanline {
+  width: 100%;
+  height: 100px;
+  z-index: 9999;
+  background: linear-gradient(0deg, rgba(255, 23, 68, 0) 0%, rgba(255, 23, 68, 0.1) 50%, rgba(255, 23, 68, 0) 100%);
+  opacity: 0.1;
+  position: absolute;
+  bottom: 100%;
+  pointer-events: none;
+  animation: scanline 8s linear infinite;
+}
+
+.mode--defense .scanline {
+  opacity: 0.2;
+}
+
+@keyframes scanline {
+  0% { bottom: 100%; }
+  100% { bottom: -100px; }
+}
+
+/* ---- Active Defense overlay indicator ---- */
+.defense-overlay {
+  position: fixed;
+  top: 100px;
+  right: 40px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.defense-badge {
+  font-family: var(--font-head);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--red);
+  text-shadow: var(--glow-red);
+  padding: 8px 30px;
+  border: 2px solid var(--red);
+  background: rgba(0,0,0,0.8);
+  box-shadow: var(--glow-red);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.defense-badge::after {
+  content: 'AUTOMATIC THREAT NEUTRALIZATION ON';
+  font-size: 0.4rem;
+  letter-spacing: 0.1em;
+  opacity: 0.8;
+}

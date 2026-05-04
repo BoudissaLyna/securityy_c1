@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNS Tunnel Detection — Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #fafaf8;
+    --surface:   #ffffff;
+    --border:    #e4e2dc;
+    --muted:     #9a9690;
+    --text:      #1a1916;
+    --text-soft: #4a4844;
+    --accent:    #1d4ed8;
+    --accent-bg: #eff6ff;
+    --code-bg:   #f3f2ef;
+    --code-text: #1a1916;
+    --warn-bg:   #fffbeb;
+    --warn-border:#d97706;
+    --tag-green: #dcfce7;
+    --tag-green-text: #166534;
+    --tag-red:   #fee2e2;
+    --tag-red-text: #991b1b;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 16px;
+  }
+
+  /* ── LAYOUT ── */
+  .wrapper {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 2rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .sidebar-logo {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 1.25rem;
+    margin-bottom: 0.4rem;
+    padding-left: 0.5rem;
+  }
+
+  .sidebar a {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--text-soft);
+    text-decoration: none;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .sidebar a:hover { background: var(--accent-bg); color: var(--accent); }
+  .sidebar a.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+
+  /* ── MAIN ── */
+  main {
+    padding: 3rem 4rem;
+    max-width: 860px;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hero-eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+  }
+
+  .hero h1 {
+    font-family: 'Lora', serif;
+    font-size: 2.6rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+
+  .hero p {
+    font-size: 1.05rem;
+    color: var(--text-soft);
+    max-width: 580px;
+    line-height: 1.6;
+  }
+
+  .badge-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
+  }
+
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--text-soft);
+    background: var(--surface);
+  }
+
+  /* ── PIPELINE FLOW ── */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 1.5rem 0;
+    flex-wrap: wrap;
+  }
+
+  .pipe-step {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1.1rem;
+    text-align: center;
+    min-width: 130px;
+  }
+  .pipe-step .pipe-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .pipe-step .pipe-sub {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-top: 0.2rem;
+  }
+
+  .pipe-arrow {
+    font-size: 1.2rem;
+    color: var(--muted);
+    padding: 0 0.5rem;
+  }
+
+  /* ── SECTIONS ── */
+  section {
+    margin-bottom: 3rem;
+    scroll-margin-top: 2rem;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .section-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 1px solid #bfdbfe;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+  }
+
+  h2 {
+    font-family: 'Lora', serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  h3 {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 1.5rem 0 0.5rem;
+  }
+
+  p { color: var(--text-soft); margin-bottom: 0.75rem; }
+
+  /* ── CODE BLOCKS ── */
+  .code-wrap {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 1rem 0;
+  }
+
+  .code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background: #ebe9e4;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .code-lang {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .copy-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .copy-btn.copied { color: #16a34a; border-color: #16a34a; }
+
+  pre {
+    padding: 1.1rem 1.25rem;
+    overflow-x: auto;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    color: var(--code-text);
+  }
+
+  code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.83em;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  /* ── TABLES ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1rem 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  thead th {
+    background: #f0ede8;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    padding: 0.7rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody tr { border-bottom: 1px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:nth-child(even) { background: #faf9f7; }
+
+  td {
+    padding: 0.65rem 1rem;
+    color: var(--text-soft);
+    vertical-align: top;
+  }
+
+  td:first-child {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  /* ── FEATURE GRID ── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+  }
+
+  .feature-card .fc-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 0.25rem;
+  }
+
+  .feature-card .fc-desc {
+    font-size: 0.82rem;
+    color: var(--text-soft);
+    line-height: 1.4;
+  }
+
+  /* ── DIFF TABLE ── */
+  .tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .tag-green { background: var(--tag-green); color: var(--tag-green-text); }
+  .tag-red   { background: var(--tag-red);   color: var(--tag-red-text); }
+
+  /* ── STEPS ── */
+  .steps { display: flex; flex-direction: column; gap: 1.5rem; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 2.5rem 1fr;
+    gap: 1rem;
+  }
+
+  .step-num {
+    width: 2.5rem;
+    height: 2.5rem;
+    background: var(--accent);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+  }
+
+  .step-body h3 { margin-top: 0; }
+
+  /* ── CALLOUT ── */
+  .callout {
+    border-left: 3px solid var(--warn-border);
+    background: var(--warn-bg);
+    padding: 0.85rem 1.1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 1rem 0;
+    font-size: 0.88rem;
+    color: #92400e;
+  }
+
+  .callout strong { color: #78350f; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  @media (max-width: 900px) {
+    .wrapper { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    main { padding: 2rem 1.5rem; }
+    .feature-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">DNS · Guide</div>
+
+    <div class="sidebar-label">Overview</div>
+    <a href="#overview">How It Works</a>
+
+    <div class="sidebar-label">The Command</div>
+    <a href="#command">tshark Command</a>
+    <a href="#flags">Flag Breakdown</a>
+
+    <div class="sidebar-label">extractor.py</div>
+    <a href="#flow-storage">Flow Storage</a>
+    <a href="#features">Feature List</a>
+    <a href="#extractor-src">Full Source</a>
+
+    <div class="sidebar-label">Simulator</div>
+    <a href="#sim">dns_sim.py</a>
+    <a href="#detection">Detection Logic</a>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main>
+
+    <!-- HERO -->
+    <div class="hero">
+      <div class="hero-eyebrow">Network Security · Real-Time Analysis</div>
+      <h1>DNS Tunnel Detection</h1>
+      <p>A live pipeline that captures DNS traffic, extracts flow-level features, and sends them to an ML backend for tunnel detection.</p>
+      <div class="badge-row">
+        <span class="badge">tshark</span>
+        <span class="badge">Python 3</span>
+        <span class="badge">httpx</span>
+        <span class="badge">UDP/TCP port 53</span>
+        <span class="badge">Shannon Entropy</span>
+      </div>
+    </div>
+
+    <!-- SECTION 1: OVERVIEW -->
+    <section id="overview">
+      <div class="section-header">
+        <span class="section-num">01</span>
+        <h2>How It Works</h2>
+      </div>
+
+      <p>The pipeline is a <strong>producer → transformer → consumer</strong> chain. tshark captures every DNS packet live and writes CSV rows to stdout. <code>extractor.py</code> reads those rows, groups them into per-flow records, computes features, then POSTs the JSON to a backend ML server.</p>
+
+      <div class="pipeline">
+        <div class="pipe-step">
+          <div class="pipe-title">tshark</div>
+          <div class="pipe-sub">Capture raw DNS packets</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-title">extractor.py</div>
+          <div class="pipe-sub">Aggregate flows + build features</div>
+        </div>
+        <div class="pipe-arrow">→</div>
+        <div class="pipe-step">
+          <div class="pipe-title">POST /analyze</div>
+          <div class="pipe-sub">ML backend inference</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: COMMAND -->
+    <section id="command">
+      <div class="section-header">
+        <span class="section-num">02</span>
+        <h2>The tshark Capture Command</h2>
+      </div>
+
+      <p>Run this single command to start the full pipeline. You need <code>sudo</code> because capturing on a network interface requires root privileges.</p>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span class="code-lang">bash</span>
+          <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        </div>
+        <pre>sudo tshark -i eth0 \
+  -f "udp port 53 or tcp port 53" \
+  -T fields \
+  -e frame.time   -e ip.src      -e ip.dst \
+  -e dns.qry.name -e dns.qry.type \
+  -e dns.resp.type -e dns.a \
+  -e dns.resp.ttl -e dns.id \
+  -e dns.flags    -e frame.len \
+  -E header=y -E separator=, -E quote=d -l \
+  | python3 extractor.py | grep entropy</pre>
+      </div>
+    </section>
+
+    <!-- SECTION 3: FLAGS -->
+    <section id="flags">
+      <div class="section-header">
+        <span class="section-num">03</span>
+        <h2>Flag Breakdown</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Flag</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>-i eth0</td><td>Capture on the ethernet interface — change to <code>wlan0</code> for Wi-Fi, use <code>ip a</code> to list yours</td></tr>
+            <tr><td>-f "udp port 53 or tcp port 53"</td><td>BPF filter — DNS traffic only, both UDP and TCP</td></tr>
+            <tr><td>-T fields</td><td>Output only the selected fields, not the full packet decode</td></tr>
+            <tr><td>-e frame.time … -e frame.len</td><td>Exactly the 11 fields that extractor.py expects, in order</td></tr>
+            <tr><td>-E header=y</td><td>Print column names on the first line (extractor.py skips it)</td></tr>
+            <tr><td>-E separator=,</td><td>CSV output format</td></tr>
+            <tr><td>-E quote=d</td><td>Double-quote every value — handles commas inside domain names</td></tr>
+            <tr><td>-l</td><td>Line-buffer stdout so Python receives data immediately, not in chunks</td></tr>
+            <tr><td>| python3 extractor.py</td><td>Pipe directly into the feature extractor</td></tr>
+            <tr><td>| grep entropy</td><td>Optional — filter stdout to lines containing the word "entropy"</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 4: FLOW STORAGE -->
+    <section id="flow-storage">
+      <div class="section-header">
+        <span class="section-num">04</span>
+        <h2>extractor.py — Flow Storage</h2>
+      </div>
+
+      <p>A global <code>flows</code> dictionary (defaultdict) holds one record per unique <code>src_ip–dst_ip</code> pair. Each record accumulates data across multiple packets before features are computed.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Field</th><th>Type</th><th>What's stored</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>timestamps</td><td>list[float]</td><td>Unix timestamp of each packet in the flow</td></tr>
+            <tr><td>packet_sizes</td><td>list[int]</td><td>frame.len of each packet</td></tr>
+            <tr><td>ttls</td><td>list[int]</td><td>DNS response TTL values seen</td></tr>
+            <tr><td>a_records</td><td>set[str]</td><td>Unique resolved IP addresses (A records)</td></tr>
+            <tr><td>domain</td><td>str</td><td>The queried domain name</td></tr>
+            <tr><td>src_ip / dst_ip</td><td>str</td><td>Flow endpoints</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 5: FEATURES -->
+    <section id="features">
+      <div class="section-header">
+        <span class="section-num">05</span>
+        <h2>Feature List</h2>
+      </div>
+
+      <p><code>build_features()</code> is called only when a flow has ≥ 2 packets. It computes the following features:</p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="fc-name">duration</div>
+          <div class="fc-desc">max(timestamps) − min(timestamps) in seconds</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">packets_rate</div>
+          <div class="fc-desc">Number of packets divided by flow duration</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">mean / std / variance</div>
+          <div class="fc-desc">Packet size statistics across the flow</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">coefficient_of_variation</div>
+          <div class="fc-desc">std / mean — measures size consistency</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">character_entropy</div>
+          <div class="fc-desc">Shannon entropy of subdomain characters — high = suspicious</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">numerical_percentage</div>
+          <div class="fc-desc">Fraction of digit characters in the subdomain</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">max_continuous_numeric_len</div>
+          <div class="fc-desc">Longest consecutive run of digits in subdomain</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">max_continuous_alphabet_len</div>
+          <div class="fc-desc">Longest consecutive run of letters in subdomain</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">vowels_consonant_ratio</div>
+          <div class="fc-desc">Measures linguistic naturalness of the subdomain</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">distinct_ttl_values</div>
+          <div class="fc-desc">Number of unique TTL values seen in the flow</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">ttl_values_min/max/mean/median</div>
+          <div class="fc-desc">TTL distribution statistics</div>
+        </div>
+        <div class="feature-card">
+          <div class="fc-name">distinct_A_records</div>
+          <div class="fc-desc">Number of unique IPs returned — high = fast-flux DNS</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 6: EXTRACTOR SOURCE -->
+    <section id="extractor-src">
+      <div class="section-header">
+        <span class="section-num">06</span>
+        <h2>extractor.py — Full Source</h2>
+      </div>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span class="code-lang">python</span>
+          <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        </div>
+        <pre>import sys
+import csv
+import math
+import json
+import httpx
+import io
+from collections import defaultdict, Counter
+from datetime import datetime
+from statistics import mean, median
+
+BACKEND_URL = "http://127.0.0.1:8000/analyze"
+
+# =========================
+# FLOW STORAGE
+# =========================
+flows = defaultdict(lambda: {
+    "timestamps": [],
+    "packet_sizes": [],
+    "ttls": [],
+    "a_records": set(),
+    "src_ip": "",
+    "dst_ip": "",
+    "src_port": "",
+    "dst_port": "",
+    "domain": ""
+})
+
+FIELDNAMES = [
+    "frame.time", "ip.src", "ip.dst",
+    "dns.qry.name", "dns.qry.type", "dns.resp.type",
+    "dns.a", "dns.resp.ttl", "dns.id",
+    "dns.flags", "frame.len"
+]
+
+# =========================
+# HELPERS
+# =========================
+
+def safe_int(x):
+    try: return int(x)
+    except: return 0
+
+def entropy(s):
+    if not s: return 0.0
+    freq = Counter(s)
+    l = len(s)
+    return -sum((c / l) * math.log2(c / l) for c in freq.values())
+
+def max_consecutive(s, condition):
+    best = cur = 0
+    for ch in s:
+        if condition(ch):
+            cur += 1
+            best = max(best, cur)
+        else:
+            cur = 0
+    return best
+
+def max_same_char(s):
+    best = cur = 1
+    for i in range(1, len(s)):
+        if s[i] == s[i - 1]:
+            cur += 1
+            best = max(best, cur)
+        else:
+            cur = 1
+    return best if s else 0
+
+def vowel_consonant_ratio(s):
+    vowels = "aeiou"
+    v = sum(1 for c in s if c in vowels)
+    c = sum(1 for c in s if c.isalpha() and c not in vowels)
+    return v / max(c, 1)
+
+# =========================
+# FLOW UPDATE
+# =========================
+
+def update_flow(row):
+    src_ip = row.get("ip.src", "")
+    dst_ip = row.get("ip.dst", "")
+    domain = row.get("dns.qry.name", "")
+    ttl    = row.get("dns.resp.ttl", "")
+    a_rec  = row.get("dns.a", "")
+    pkt    = safe_int(row.get("frame.len", "0"))
+
+    fid = f"{src_ip}-{dst_ip}"
+    f   = flows[fid]
+
+    f["timestamps"].append(datetime.now().timestamp())
+    f["packet_sizes"].append(pkt)
+    f["src_ip"]  = src_ip
+    f["dst_ip"]  = dst_ip
+    f["domain"]  = domain
+
+    if ttl.isdigit(): f["ttls"].append(int(ttl))
+    if a_rec:         f["a_records"].add(a_rec)
+
+    return fid
+
+# =========================
+# FEATURE BUILDER
+# =========================
+
+def build_features(flow_id):
+    f = flows[flow_id]
+    if len(f["timestamps"]) < 2:
+        return None
+
+    t     = f["timestamps"]
+    sizes = f["packet_sizes"]
+    ttls  = f["ttls"]
+    domain = f["domain"] or ""
+
+    duration    = max(t) - min(t)
+    total_bytes = sum(sizes)
+    mean_size   = mean(sizes)
+    var         = mean([(x - mean_size) ** 2 for x in sizes])
+    std         = math.sqrt(var)
+
+    labels = domain.split('.') if domain else []
+    tld    = labels[-1]  if len(labels) >= 1 else ""
+    sld    = labels[-2]  if len(labels) >= 2 else ""
+    sub    = '.'.join(labels[:-2]) if len(labels) > 2 else ""
+
+    ent     = entropy(sub)
+    num_pct = sum(c.isdigit() for c in sub) / max(len(sub), 1)
+
+    return {
+        "flow_id":                        flow_id,
+        "timestamp":                      min(t),
+        "src_ip":                         f["src_ip"],
+        "dst_ip":                         f["dst_ip"],
+        "duration":                       duration,
+        "total_bytes":                    total_bytes,
+        "packets_rate":                   len(sizes) / max(duration, 1e-6),
+        "packets_len_rate":               total_bytes / max(duration, 1e-6),
+        "min_packets_len":                min(sizes),
+        "max_packets_len":                max(sizes),
+        "mean_packets_len":               mean_size,
+        "standard_deviation_packets_len": std,
+        "variance_packets_len":           var,
+        "coefficient_of_variation_packets_len": std / max(mean_size, 1e-6),
+        "dns_domain_name":                domain,
+        "dns_domain_name_length":         len(domain),
+        "dns_subdomain_name_length":      len(sub),
+        "dns_top_level_domain":           tld,
+        "dns_second_level_domain":        sld,
+        "character_entropy":              ent,
+        "numerical_percentage":           num_pct,
+        "character_distribution":         dict(Counter(sub)),
+        "max_continuous_numeric_len":     max_consecutive(sub, str.isdigit),
+        "max_continuous_alphabet_len":    max_consecutive(sub, str.isalpha),
+        "max_continuous_same_alphabet_len": max_same_char(sub),
+        "vowels_consonant_ratio":         vowel_consonant_ratio(sub),
+        "distinct_ttl_values":            len(set(ttls)) if ttls else 0,
+        "ttl_values_min":                 min(ttls)    if ttls else -1,
+        "ttl_values_max":                 max(ttls)    if ttls else -1,
+        "ttl_values_mean":                mean(ttls)   if ttls else -1,
+        "ttl_values_median":              median(ttls) if ttls else -1,
+        "distinct_A_records":             len(f["a_records"])
+    }
+
+# =========================
+# SEND
+# =========================
+
+def send(features):
+    try:
+        httpx.post(BACKEND_URL, json=features, timeout=5.0)
+    except:
+        print(json.dumps(features))
+
+# =========================
+# MAIN LOOP
+# =========================
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line or line.startswith("frame.time"):
+            continue
+        reader = csv.DictReader(io.StringIO(line), fieldnames=FIELDNAMES)
+        row    = next(reader)
+        fid    = update_flow(row)
+        feat   = build_features(fid)
+        if feat:
+            send(feat)
+
+if __name__ == "__main__":
+    main()</pre>
+      </div>
+    </section>
+
+    <!-- SECTION 7: SIM -->
+    <section id="sim">
+      <div class="section-header">
+        <span class="section-num">07</span>
+        <h2>dns_sim.py — Traffic Simulator</h2>
+      </div>
+
+      <p>Before you have real attack traffic, use this script to test the pipeline end-to-end. It fires <strong>50 DNS queries</strong> — roughly half to legitimate domains and half to randomly-generated subdomains that mimic DNS tunneling.</p>
+
+      <div class="code-wrap">
+        <div class="code-header">
+          <span class="code-lang">python</span>
+          <button class="copy-btn" onclick="copyCode(this)">copy</button>
+        </div>
+        <pre>import os
+import random
+import string
+
+def normal():
+    domains = ["google.com", "ensia.edu.dz", "facebook.com", "wikipedia.org"]
+    return random.choice(domains)
+
+def malicious():
+    sub = ''.join(random.choices(string.ascii_lowercase + string.digits, k=25))
+    return f"{sub}.evil.com"
+
+for _ in range(50):
+    domain = normal() if random.random() < 0.5 else malicious()
+    os.system(f"dig {domain} > /dev/null")</pre>
+      </div>
+    </section>
+
+    <!-- SECTION 8: DETECTION -->
+    <section id="detection">
+      <div class="section-header">
+        <span class="section-num">08</span>
+        <h2>Detection Logic — Normal vs Malicious</h2>
+      </div>
+
+      <p>The features are designed to expose the statistical difference between human-readable domain names and randomly-generated DGA/tunnel subdomains.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Property</th><th>Normal domain</th><th>DGA / Tunnel domain</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Subdomain length</td>
+              <td><span class="tag tag-green">Short 0–10 chars</span></td>
+              <td><span class="tag tag-red">Long 20–40+ chars</span></td>
+            </tr>
+            <tr>
+              <td>Character entropy</td>
+              <td><span class="tag tag-green">Low 2.0–2.8 bits</span></td>
+              <td><span class="tag tag-red">High 3.5–4.5 bits</span></td>
+            </tr>
+            <tr>
+              <td>Digit percentage</td>
+              <td><span class="tag tag-green">Near 0%</span></td>
+              <td><span class="tag tag-red">~20–40%</span></td>
+            </tr>
+            <tr>
+              <td>Vowel/consonant ratio</td>
+              <td><span class="tag tag-green">Natural ~0.4</span></td>
+              <td><span class="tag tag-red">Random ~0.2–0.6</span></td>
+            </tr>
+            <tr>
+              <td>Distinct A records</td>
+              <td><span class="tag tag-green">1–2 IPs</span></td>
+              <td><span class="tag tag-red">Many (fast-flux)</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <strong>Thresholds are starting points.</strong> Use <code>character_entropy &gt; 3.5</code>, <code>numerical_percentage &gt; 0.2</code>, or <code>subdomain_length &gt; 20</code> for simple rules. Your ML model will learn better boundaries from labeled data.
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  // Copy button
+  function copyCode(btn) {
+    const pre = btn.closest('.code-wrap').querySelector('pre');
+    navigator.clipboard.writeText(pre.innerText).then(() => {
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1800);
+    });
+  }
+
+  // Active sidebar link on scroll
+  const sections = document.querySelectorAll('section[id]');
+  const links    = document.querySelectorAll('.sidebar a');
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.sidebar a[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3 });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>

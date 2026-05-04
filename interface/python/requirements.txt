@@ -1,0 +1,15 @@
+# DNS Tunnel Sentinel — Python backend dependencies
+# ===================================================
+# Capture Engine (capture_engine.py) — Scapy WebSocket bridge
+scapy>=2.5.0
+websockets>=12.0
+
+# tshark Extractor (extractor.py) — CSV pipe → ML backend
+httpx>=0.27.0
+
+# ML Model Inference (capture_engine.py loads best_model.joblib)
+joblib>=1.3.0
+scikit-learn>=1.5.0
+xgboost>=2.0.0
+pandas>=2.0.0
+numpy>=1.24.0
