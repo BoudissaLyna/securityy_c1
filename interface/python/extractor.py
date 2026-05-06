@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 """
 ============================================================
- DNS TUNNEL SENTINEL — tshark Feature Extractor
- Reads tshark CSV from stdin, builds 38 flow-level features,
- and POSTs them to the ML inference bridge on port 8000.
+ DNS TUNNEL SENTINEL — Active Inline Gatekeeper
+ Intercepts UDP port 53 traffic using PyDivert, extracts
+ 38 flow-level features via Scapy, and queries the ML backend.
+ If prediction is 'Tunnel' / 'malicious' / '1', drops the packet.
+ Otherwise, re-injects the packet back to the network.
 
- PIPELINE:
-   tshark -i <iface> -f "udp port 53 or tcp port 53" \
-     -T fields \
-     -e frame.time -e ip.src -e ip.dst \
-     -e dns.qry.name -e dns.qry.type -e dns.resp.type \
-     -e dns.a -e dns.resp.ttl -e dns.id \
-     -e dns.flags -e frame.len \
-     -E header=y -E separator=, -E quote=d -l \
-     | python3 extractor.py
-
- REQUIRES:  pip install httpx
+ REQUIRES:  pip install httpx pydivert scapy
+ NOTE: Must be run as Administrator on Windows.
 ============================================================
 """
 import sys
-import csv
 import math
 import json
 import httpx
-import io
+import time
 from collections import defaultdict, Counter
-from datetime import datetime
 from statistics import mean, median, mode
+
+# Third-party imports
+try:
+    import pydivert
+    from scapy.all import IP, IPv6, UDP, DNS
+except ImportError as e:
+    print(f"Error importing dependencies: {e}")
+    print("Please ensure you have installed: pip install httpx pydivert scapy")
+    sys.exit(1)
 
 BACKEND_URL = "http://127.0.0.1:8000/analyze"
 
@@ -40,29 +40,13 @@ flows = defaultdict(lambda: {
     "ttls": [],
     "a_records": set(),
     "rr_types": [],            # list of dns.resp.type values
-    "rr_classes": [],          # placeholder (derived from flags)
+    "rr_classes": [],          # list of unique rr_types
     "src_ip": "",
     "dst_ip": "",
-    "domain": ""
+    "domain": "",
+    "verdict": None            # Cache the verdict so we don't query repeatedly
 })
 
-# IMPORTANT: must EXACTLY match tshark -e order
-FIELDNAMES = [
-    "frame.time",
-    "ip.src",
-    "ip.dst",
-    "dns.qry.name",
-    "dns.qry.type",
-    "dns.resp.type",
-    "dns.a",
-    "dns.resp.ttl",
-    "dns.id",
-    "dns.flags",
-    "frame.len"
-]
-
-# DNS response type numeric → name mapping
-RR_TYPE_MAP = {1: "A", 5: "CNAME", 16: "TXT", 28: "AAAA", 2: "NS", 15: "MX"}
 
 # =========================
 # SAFE HELPERS
@@ -74,13 +58,11 @@ def safe_int(x, default=0):
     except:
         return default
 
-
 def safe_float(x, default=0.0):
     try:
         return float(x)
     except:
         return default
-
 
 def entropy(s):
     if not s:
@@ -88,7 +70,6 @@ def entropy(s):
     freq = Counter(s)
     l = len(s)
     return -sum((c / l) * math.log2(c / l) for c in freq.values())
-
 
 def max_consecutive(s, condition):
     best = cur = 0
@@ -99,7 +80,6 @@ def max_consecutive(s, condition):
         else:
             cur = 0
     return best
-
 
 def max_same_char(s):
     if not s:
@@ -113,20 +93,16 @@ def max_same_char(s):
             cur = 1
     return best
 
-
 def vowel_consonant_ratio(s):
     vowels = set("aeiouAEIOU")
     v = sum(1 for c in s if c in vowels)
     c = sum(1 for c in s if c.isalpha() and c not in vowels)
     return v / max(c, 1)
 
-
 def is_consonant(ch):
     return ch.isalpha() and ch.lower() not in "aeiou"
 
-
 def conv_freq_vowels_consonants(s):
-    """Count vowel→consonant or consonant→vowel transitions."""
     if len(s) < 2:
         return 0
     vowels = set("aeiouAEIOU")
@@ -140,7 +116,6 @@ def conv_freq_vowels_consonants(s):
             transitions += 1
     return transitions
 
-
 def safe_mode(vals):
     if not vals:
         return -1
@@ -149,64 +124,73 @@ def safe_mode(vals):
     except:
         return Counter(vals).most_common(1)[0][0]
 
+
 # =========================
 # FLOW UPDATE
 # =========================
 
-def update_flow(row):
-    src_ip = row.get("ip.src", "")
-    dst_ip = row.get("ip.dst", "")
-    domain  = row.get("dns.qry.name", "")
-    ttl_raw = row.get("dns.resp.ttl", "")
-    a_rec   = row.get("dns.a", "")
-    rr_type = row.get("dns.resp.type", "")
-    flags   = row.get("dns.flags", "")
-    pkt_size = safe_int(row.get("frame.len", "0"))
+def update_flow(scapy_pkt, packet_len):
+    if IP in scapy_pkt:
+        src_ip = scapy_pkt[IP].src
+        dst_ip = scapy_pkt[IP].dst
+    elif IPv6 in scapy_pkt:
+        src_ip = scapy_pkt[IPv6].src
+        dst_ip = scapy_pkt[IPv6].dst
+    else:
+        return None
 
-    flow_id = f"{src_ip}-{dst_ip}"
-    now = datetime.now().timestamp()
+    if not scapy_pkt.haslayer(DNS):
+        return None
 
-    f = flows[flow_id]
+    dns_layer = scapy_pkt[DNS]
+    
+    # Scapy QR: 0 = query, 1 = response
+    is_response = (dns_layer.qr == 1)
+
+    # Use canonical flow ID to group bidirectional communication
+    canonical_id = f"{min(src_ip, dst_ip)}={max(src_ip, dst_ip)}"
+    now = time.time()
+
+    f = flows[canonical_id]
     f["timestamps"].append(now)
     f["src_ip"] = src_ip
     f["dst_ip"] = dst_ip
-    f["domain"] = domain
-
-    # Separate outgoing queries from incoming responses by flags
-    # DNS response bit is bit 15 of flags (0x8000)
-    try:
-        flags_int = int(flags, 16) if flags.startswith("0x") else int(flags)
-        is_response = bool(flags_int & 0x8000)
-    except:
-        is_response = False
-
+    
+    # Extract Domain
+    domain = ""
+    if dns_layer.qdcount > 0 and dns_layer.qd is not None:
+        try:
+            domain = dns_layer.qd[0].qname.decode('utf-8', errors='ignore')
+        except:
+            domain = str(dns_layer.qd[0].qname)
+            
+    if domain:
+        f["domain"] = domain
+        
     if is_response:
-        f["recv_sizes"].append(pkt_size)
+        f["recv_sizes"].append(packet_len)
     else:
-        f["packet_sizes"].append(pkt_size)
+        f["packet_sizes"].append(packet_len)
 
-    # TTL
-    try:
-        f["ttls"].append(int(ttl_raw))
-    except:
-        pass
+    if is_response and dns_layer.ancount > 0 and dns_layer.an is not None:
+        for i in range(dns_layer.ancount):
+            ans = dns_layer.an[i]
+            if hasattr(ans, 'ttl'):
+                f["ttls"].append(ans.ttl)
+            if hasattr(ans, 'type'):
+                rr_type = ans.type
+                f["rr_types"].append(rr_type)
+                if rr_type == 1: # A record
+                    if hasattr(ans, 'rdata'):
+                        rdata = ans.rdata
+                        if isinstance(rdata, bytes):
+                            f["a_records"].add(rdata.decode('utf-8', errors='ignore'))
+                        else:
+                            f["a_records"].add(str(rdata))
 
-    # A records
-    if a_rec:
-        f["a_records"].add(a_rec)
-
-    # RR types (response resource record types)
-    if rr_type:
-        for rt in rr_type.split(","):
-            t = safe_int(rt.strip())
-            if t:
-                f["rr_types"].append(t)
-
-    # RR classes — tshark doesn't expose separately by default,
-    # we count unique rr_types as a proxy for rr_class_count
     f["rr_classes"] = list(set(f["rr_types"]))
+    return canonical_id
 
-    return flow_id
 
 # =========================
 # FEATURE BUILDER — 38 features matching model
@@ -307,38 +291,79 @@ def build_features(flow_id):
         "_domain":   domain,
     }
 
+
 # =========================
-# SEND
+# GATEKEEPER LOGIC
 # =========================
 
-def send(features):
+def check_verdict(features):
+    """
+    Query the ML endpoint. Return True if the verdict is malicious ('Tunnel').
+    """
     try:
-        httpx.post(BACKEND_URL, json=features, timeout=5.0)
-    except Exception as e:
-        # Fallback: print to stdout so operator can see it
-        print(json.dumps({k: v for k, v in features.items() if not k.startswith("_")}))
-
-# =========================
-# MAIN LOOP
-# =========================
+        resp = httpx.post(BACKEND_URL, json=features, timeout=1.0)
+        if resp.status_code == 200:
+            result = resp.json()
+            
+            # Accommodate various possible response keys indicating malice
+            for key in ["prediction", "verdict", "result"]:
+                val = result.get(key)
+                if val in [1, '1', 'malicious', 'Tunnel']:
+                    return True
+    except Exception:
+        # Fail-safe: if the backend is unreachable or times out, allow traffic
+        pass
+    return False
 
 def main():
-    for line in sys.stdin:
-        line = line.strip()
-        if not line or line.startswith("frame.time"):
-            continue
+    print("=====================================================")
+    print(" DNS Tunnel Sentinel — Active Gatekeeper")
+    print(" Intercepting UDP Port 53 traffic. Press Ctrl+C to stop.")
+    print("=====================================================")
 
-        reader = csv.DictReader(io.StringIO(line), fieldnames=FIELDNAMES)
-        row = next(reader, None)
-        if not row:
-            continue
-
-        flow_id = update_flow(row)
-        features = build_features(flow_id)
-
-        if features:
-            send(features)
-
+    try:
+        with pydivert.WinDivert("udp.DstPort == 53 or udp.SrcPort == 53") as w:
+            for packet in w:
+                drop_packet = False
+                try:
+                    raw_bytes = packet.raw
+                    scapy_pkt = IP(raw_bytes) if packet.is_ipv4 else IPv6(raw_bytes)
+                    
+                    # Approximate full Ethernet frame length for model compatibility
+                    # tshark frame.len includes Ethernet header (~14 bytes)
+                    packet_len = len(raw_bytes) + 14 
+                    
+                    flow_id = update_flow(scapy_pkt, packet_len)
+                    
+                    if flow_id:
+                        f = flows[flow_id]
+                        
+                        # Once marked as a Tunnel, actively drop subsequent packets in flow
+                        if f.get("verdict") == "Tunnel":
+                            drop_packet = True
+                        else:
+                            features = build_features(flow_id)
+                            if features:
+                                is_malicious = check_verdict(features)
+                                if is_malicious:
+                                    f["verdict"] = "Tunnel"
+                                    drop_packet = True
+                                    print(f"[!] DROPPING TUNNEL TRAFFIC -> Flow: {flow_id} | Domain: {f['domain']}")
+                except Exception as e:
+                    # Fail-safe: ignore parsing errors to prevent dropping innocent traffic
+                    pass
+                
+                # Active re-injection if the packet was not classified as a Tunnel
+                if not drop_packet:
+                    w.send(packet)
+                    
+    except PermissionError:
+        print("\n[ERROR] PyDivert requires administrative privileges.")
+        print("Please run this script as an Administrator.")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nStopping Gatekeeper...")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

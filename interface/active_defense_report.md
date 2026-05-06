@@ -11,14 +11,20 @@ The primary intelligence of the system is a high-performance **XGBoost Classifie
 ## 3. Active Defense Architecture
 When a threat is identified by the ML engine, the **Active Defense** pipeline is triggered:
 
-### A. Real-Time Neutralization (Simulation)
+### A. Real-Time Automated Neutralization
+When the ML engine classifies a flow as a "Tunnel":
+1. **Network Interception**: The active gatekeeper intercepts DNS packets directly at the network layer using the Windows Filtering Platform (via PyDivert).
+2. **Verdict Enforcement**: The flow is marked as malicious, and the packet is physically dropped to sever the tunnel connection. Subsequent packets within the same flow are automatically dropped without redundant ML inference.
+3. **Traffic Elimination**: The gatekeeper operates as a true inline Intrusion Prevention System (IPS), silently discarding malicious packets while seamlessly re-injecting legitimate traffic back into the network stack.
+
+### B. Manual Administrator Intervention
 When an administrator clicks **"BLOCK IP"** in the HUD:
 1. **Command Propagation**: The React UI sends an asynchronous `block_ip` command via WebSocket to the Python backend.
-2. **Local Blocklist Insertion**: The Python Capture Engine adds the source IP address to a high-speed memory set (`blocked_ips`).
-3. **Traffic Filtering**: Every subsequent packet arriving from that IP is intercepted at the ingest layer, matched against the blocklist, and immediately flagged as `IP MANUALLY BLOCKED (Sentinel)`.
+2. **Local Blocklist Insertion**: The Python engine adds the source IP address to a high-speed memory set (`blocked_ips`).
+3. **Active Filtering**: Every subsequent packet arriving from that IP is matched against the blocklist and immediately dropped by the active defense layer.
 
-### B. Demonstration Protocol
-For testing purposes, the system **simulates** the final firewall trigger. Instead of modifying the system's global routing table, it operates a **Local Firewall Layer** within the application kernel. This ensures the demo is safe but accurately represents how the logic would interface with production firewalls.
+### C. True Inline Active Defense
+The system has been upgraded from a simulated alert mechanism to an actual **Inline Firewall Layer**. Rather than merely flagging threats in a localized dashboard, it directly interacts with the OS network stack to neutralize DNS tunneling attempts in the wild.
 
 ## 4. Key Security Benefits
 - **Zero-Latency Response**: The blocklist is checked in $O(1)$ time using hash-set lookups.
