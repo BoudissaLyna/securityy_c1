@@ -3,19 +3,20 @@
 ## 1. Overview
 This project implements a proactive security posture known as **Active Defense**. Unlike traditional monitors that only log threats, this system identifies malicious DNS tunnels in real-time and provides a direct feedback loop to neutralize the attacking source.
 
-## 2. Detection Engine (The ML Core)
-The primary intelligence of the system is a high-performance **XGBoost Classifier**. 
-- **Features**: The engine extracts 38 discrete features from every DNS flow (Entropy, TTL variance, packet length ratios, etc.).
-- **Decision**: The model assigns a confidence score to every packet. If the probability of a "Tunnel" class exceeds the threshold, the packet is labeled as `BLOCKED`.
+## 2. Extraction & Detection Engine
+The primary intelligence of the system is driven by a real-time extraction pipeline feeding a high-performance **XGBoost Classifier**. 
+- **Packet Interception & Parsing**: The system intercepts UDP port 53 traffic using PyDivert and decodes the packets using Scapy. It tracks bidirectional communication in memory, grouping queries and responses into unified flows.
+- **Feature Extraction**: The engine computes 38 discrete flow-level features on the fly. These include statistical packet length metrics (mean, variance, rate), domain lexical properties (entropy, vowel/consonant ratios, consecutive character runs), and DNS-specific features (TTL variance, RR type distribution, distinct A records).
+- **Decision Query**: The extracted features are sent to a local backend API. If the ML model classifies the features as "Tunnel" or malicious, the active defense response is triggered.
 
-## 3. Active Defense Architecture
-When a threat is identified by the ML engine, the **Active Defense** pipeline is triggered:
+## 3. Active Defense Architecture (The Gatekeeper)
+The system operates as a true inline Intrusion Prevention System (IPS), directly interacting with the Windows Filtering Platform to neutralize threats:
 
-### A. Real-Time Automated Neutralization
-When the ML engine classifies a flow as a "Tunnel":
-1. **Network Interception**: The active gatekeeper intercepts DNS packets directly at the network layer using the Windows Filtering Platform (via PyDivert).
-2. **Verdict Enforcement**: The flow is marked as malicious, and the packet is physically dropped to sever the tunnel connection. Subsequent packets within the same flow are automatically dropped without redundant ML inference.
-3. **Traffic Elimination**: The gatekeeper operates as a true inline Intrusion Prevention System (IPS), silently discarding malicious packets while seamlessly re-injecting legitimate traffic back into the network stack.
+### A. Real-Time Inline Neutralization
+When the gatekeeper classifies a flow as a "Tunnel":
+1. **Network Interception**: DNS packets are held directly at the network layer.
+2. **Verdict Enforcement**: The flow is marked as malicious in a local flow cache. The packet is then physically dropped (not re-injected) to sever the tunnel connection. Subsequent packets within the same flow are automatically dropped in $O(1)$ time without redundant ML inference.
+3. **Legitimate Traffic Re-injection**: If a packet belongs to a benign flow, the gatekeeper seamlessly re-injects the packet back into the network stack, ensuring zero disruption to normal DNS operations.
 
 ### B. Manual Administrator Intervention
 When an administrator clicks **"BLOCK IP"** in the HUD:
